@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<modification>
+    <name><![CDATA[Duplicate Content Fix]]></name>
+    <code><![CDATA[duplicate_content_fix]]></code>
+    <version><![CDATA[1.0]]></version>
+    <author><![CDATA[iSenseLabs]]></author>
+    <link><![CDATA[https://isenselabs.com]]></link>
+    <file path="catalog/controller/product/category.php">
+        <operation>
+            <search><![CDATA[$category_info = $this->model_catalog_category->getCategory($category_id);]]></search>
+            <add position="before"><![CDATA[
+                $this->session->data['last.entered.category'] = $category_id;
+            ]]></add>
+        </operation>
+    </file>    
+    <file path="catalog/controller/*/seo_url.php">
+        <operation>
+            <search><![CDATA[public function index() {]]></search>
+            <add position="before"><![CDATA[
+                public function findParentPath($category_id) {
+                    $found_path = array($category_id);                   
+                    do {
+                        $category_result = $this->db->query("SELECT * FROM " . DB_PREFIX . "category WHERE category_id = '" . $category_id . "'");
+                        $category_id = (int)$category_result->row['parent_id'];
+                        if ($category_id > 0 && !in_array($category_id, $found_path)) {
+                            array_unshift($found_path, $category_id);
+                        }
+                    } while ($category_id != 0);                   
+                    return $found_path;
+                }
+            ]]></add>
+        </operation>        
+        <operation>
+            <search><![CDATA[parse_str($url_info['query'], $data);]]></search>
+            <add position="after"><![CDATA[
+                $has_product_id = false;
+                $has_path = false;               
+                foreach ($data as $query_key => $query_value) {
+                    if ($query_key == 'product_id' && !empty($data['route']) && $data['route'] == 'product/product') {
+                        $has_product_id = $query_value;
+                        unset($data['product_id']); // We will set it later, because we need product_id to be after path.
+                    }                   
+                    if ($query_key == 'path') {
+                        $has_path = true;
+                    }
+                }               
+                // Calculate full path
+                $parent_categories_paths = array();               
+                if ($has_product_id !== false) {
+                    // Unset path and manufacturer_id because there is a product_id
+                    unset($data['path']);
+                    unset($data['manufacturer_id']);
+                } else if ($has_path) {
+                    // Find the true path based on the last category_id                   
+                    $path_parts = explode('_', $data['path']);
+                    $category_id = $path_parts[count($path_parts) - 1];                   
+                    $parent_categories_paths[] = $this->findParentPath($category_id);
+                }               
+                if (!empty($parent_categories_paths)) {
+                    $last_entered_category = !empty($this->session->data['last.entered.category']) ? (int)$this->session->data['last.entered.category'] : 0;                   
+                    $data['path'] = implode('_', $parent_categories_paths[0]);
+
+                    $has_path = true;                   
+                    foreach ($parent_categories_paths as $parent_categories_path_candidate) {
+                        if (in_array($last_entered_category, $parent_categories_path_candidate)) {
+                            $data['path'] = implode('_', $parent_categories_path_candidate);
+                            break;
+                        }
+                    }
+                }
+                if ($has_product_id !== false) {
+                    $data['product_id'] = $has_product_id;
+                }
+            ]]></add>
+        </operation>
+    </file>
+</modification>
